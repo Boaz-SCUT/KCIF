@@ -10,7 +10,7 @@ Systematized Nomenclature of Medicine Clinical Terms, providing standardized med
 
 # Data Acquisition Instructions
 
-⚠️ **Important Notice**: Due to copyright and privacy protection requirements, this project does not include original data files.
+**Important Notice**: Due to copyright and privacy protection requirements, this project does not include original data files.
 
 **Acquisition Steps**:
 
