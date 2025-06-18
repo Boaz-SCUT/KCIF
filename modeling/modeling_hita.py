@@ -3,7 +3,7 @@ import torch
 from modeling.modeling_encoder import TextEncoder, MODEL_NAME_TO_CLASS
 from utils.data_hita import *
 from utils.layers import *
-from modeling.transformer_hita import TransformerTime
+from modeling.transformer_kcif import TransformerTime
 
 
 # 图神经网络内的消息传递
@@ -162,18 +162,17 @@ class QAGNN(nn.Module):
         # self.fc = MLP(sent_dim*2, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True) #不加入graph的embedding和预训练模型
         # self.fc = MLP(sent_dim * 2 + 44, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)  # 不加入graph的embedding和预训练模型
         # self.fc = MLP(sent_dim * 3 + 44, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)  # 不加入graph的embedding和预训练模型
-        # self.fc = MLP((sent_dim+44)*2, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True) #不加入graph的embedding和预训练模型
-        
-        # self.is_pretrain = False
-        # if self.is_pretrain:
-        #     self.fc = MLP((sent_dim+44), fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
-        # else:
-        #     self.use_graph = True
-        #     if self.use_graph:
-        #         self.fc = MLP((sent_dim+44)*2+768, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
-        #         # self.fc = MLP((sent_dim+44)+768, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
-        #     else:
-        #         self.fc = MLP((sent_dim+44)*2, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
+        self.fc = MLP((sent_dim+44)*3, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True) #不加入graph的embedding和预训练模型
+        self.is_pretrain = False
+        if self.is_pretrain:
+            self.fc = MLP((sent_dim+44), fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
+        else:
+            self.use_graph = True
+            if self.use_graph:
+                self.fc = MLP((sent_dim+44)*2+768, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
+                # self.fc = MLP((sent_dim+44)+768, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
+            else:
+                self.fc = MLP((sent_dim+44)*2, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
         # self.fc2 = MLP((sent_dim + 44) , fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
         self.fc2 = MLP((sent_dim + 44)*3, fc_dim, self.pre_dim, n_fc_layer, p_fc, layer_norm=True)
         
@@ -184,12 +183,12 @@ class QAGNN(nn.Module):
         self.dropout_g = nn.Dropout(0.9)  # mimic iii
         self.dropout_z = nn.Dropout(0.9)
         # 为了使得各个张量的最后一个维度一致，我们需要使用线性变换
-        # self.linear_seq_graph = torch.nn.Linear(768, 256)  # 用于将graph_seq_emb的尺寸从768变换到812
-        # self.linear_graph = torch.nn.Linear(100, 256)  # 用于将graph_seq_emb的尺寸从768变换到812
-        # self.linear_Z = torch.nn.Linear(100, 256)  # 用于将graph_seq_emb的尺寸从768变换到812
-        # self.linear_sent_vec = torch.nn.Linear(812, 256)  # 用于将sent_vecs的尺寸从812变换到256
-        # self.linear_dl_vec = torch.nn.Linear(812, 256)
-        # self.linear_concat = torch.nn.Linear(768+812+200, 812)
+        self.linear_seq_graph = torch.nn.Linear(768, 256)  # 用于将graph_seq_emb的尺寸从768变换到812
+        self.linear_graph = torch.nn.Linear(100, 256)  # 用于将graph_seq_emb的尺寸从768变换到812
+        self.linear_Z = torch.nn.Linear(100, 256)  # 用于将graph_seq_emb的尺寸从768变换到812
+        self.linear_sent_vec = torch.nn.Linear(812, 256)  # 用于将sent_vecs的尺寸从812变换到256
+        self.linear_dl_vec = torch.nn.Linear(812, 256)
+        self.linear_concat = torch.nn.Linear(768+812+200, 812)
 
         self.activateOut = torch.nn.Sigmoid()
 
@@ -642,7 +641,7 @@ class LM_QAGNN(nn.Module):
         total = 0.1*ortho_loss + div_loss
         return total
     
-    def contrastive_loss(self, patient_embeddings, sent_vec):
+    def contrastive_loss0(self, patient_embeddings, sent_vec):
         # 确保输入在同一设备上
         device = sent_vec.device
         patient_embeddings = patient_embeddings.to(device)
@@ -660,7 +659,31 @@ class LM_QAGNN(nn.Module):
         loss = F.cross_entropy(logits, labels)
         
         return loss
-    
+
+    def contrastive_loss(self, patient_embeddings, sent_vec, lambda_weight=0.7, temperature=1.0):
+
+        # 确保嵌入是归一化的
+        patient_embeddings = F.normalize(patient_embeddings, p=2, dim=1)
+        sent_vec = F.normalize(sent_vec, p=2, dim=1)
+
+        # 计算相似度矩阵，形状为 (batch_size, batch_size)
+        similarity_matrix = torch.matmul(patient_embeddings, sent_vec.t()) / temperature
+
+        # 第一部分损失：log [exp(s_ii) / sum_k exp(s_ik)]
+        log_prob = F.log_softmax(similarity_matrix, dim=1)
+        loss_part1 = -log_prob.diag().sum()  # 取对角线元素的和并取负号
+
+        # 第二部分损失：log [exp(s_ii) / sum_{k != i} exp(s_ik)]
+        exp_sim = torch.exp(similarity_matrix)
+        sum_exp_neg = exp_sim.sum(dim=1) - exp_sim.diag()  # 减去 exp(s_ii)
+        sum_exp_neg = sum_exp_neg.clamp(min=1e-10)  # 防止除以零
+        loss_part2 = -torch.log(torch.exp(similarity_matrix.diag()) / sum_exp_neg).sum()
+
+        # 组合损失并归一化
+        loss = (loss_part1 + lambda_weight * loss_part2) / patient_embeddings.size(0)
+
+        return loss
+
     def compute_orthogonality_loss(self, hv, vec1, vec2, vec3):
         """
         Compute soft orthogonality constraints using squared inner products
@@ -717,8 +740,8 @@ class LM_QAGNN(nn.Module):
         self.proj_lab = self.proj_lab.to(device)
         self.hv_generator = self.hv_generator.to(device)
         lab_proj = self.proj_lab(lab_embeddings)  # [bs, 768]
-        # hv = self.generate_hv(vecs_hita, lab_proj, seqG_embeddings)
-        hv = self.generate_hv0(vecs_hita, lab_proj)
+        hv = self.generate_hv(vecs_hita, lab_proj, seqG_embeddings)
+        # hv = self.generate_hv0(vecs_hita, lab_proj)
 
         # self.hv_generator2 = self.hv_generator2.to(device)
         # hv1, hv2 = self.generate_hv2(vecs_hita, lab_proj, seqG_embeddings) 
@@ -727,11 +750,11 @@ class LM_QAGNN(nn.Module):
         if phrase == 'train':
             # 1. 正交约束损失
             ortho_loss = self.compute_orthogonality_loss(hv, vecs_hita, lab_proj, seqG_embeddings)
-            # 2. 对比损失
+            # 2. 正交损失
             contrastive_loss = self.contrastive_loss(seqG_embeddings, vecs_hita)
             
             # 3. 正交损失 + 对比损失
-            contrastive_loss = 0.001*ortho_loss + 0.1*contrastive_loss            
+            contrastive_loss = ortho_loss + contrastive_loss            
             
             # 4. 不用对比损失
             # contrastive_loss = ortho_loss
@@ -966,6 +989,9 @@ class LM_QAGNN_DataLoader(object):
             *self.test_decoder_data, self.test_adj_data = load_sparse_adj_data_with_contextnode(test_adj_path,
                                                                                                 max_node_num,
                                                                                                 num_choice, args)
+            # assert all(len(self.test_qids) == len(self.test_adj_data[0]) == x.size(0) for x in [self.test_labels] + self.test_encoder_data + self.test_decoder_data)
+
+        # self.is_inhouse = 0 # 不要，不会改。修掉修掉！
         if self.is_inhouse:
             with open(inhouse_train_qids_path, 'r') as fin:
                 inhouse_qids = set(line.strip() for line in fin)
