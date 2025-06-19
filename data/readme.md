@@ -20,7 +20,7 @@ Systematized Nomenclature of Medicine Clinical Terms, providing standardized med
  - Apply for and obtain data access permissions
 
 2. **SNOMED CT**
- - Visit the official [SNOMED International](https://www.snomed.org/) website
+ - Visit the official [SNOMED International](https://www.nlm.nih.gov/healthit/snomedct/index.html) website
  - Register an account and apply for free usage license
  - Download the terminology set for the corresponding language
 
