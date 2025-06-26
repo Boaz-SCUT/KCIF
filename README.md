@@ -30,10 +30,10 @@ KCIF/
 
 ## Usage
 
-All hyperparameters and model configurations are centrally managed in `qagnn_hita.py`. To start model training and validation, simply run:
+All hyperparameters and model configurations are centrally managed in `train.py`. To start model training and validation, simply run:
 
 ```bash
-python qagnn_hita.py
+python train.py
 ```
 
 All configuration parameters can be easily adjusted to meet your specific experimental requirements.
