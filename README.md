@@ -9,7 +9,7 @@ Disease prediction based on multimodal data is a critical yet challenging task i
 ## The main directory structure is as follows:
 
 ```
-KG_mimic*/
+KCIF/
 ├── train.py              # Main program entry
 ├── metrics.py  # evaluate function
 ├── modeling/                   # Core model definitions
